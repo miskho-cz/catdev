@@ -1,7 +1,19 @@
 require('dotenv').config();
+const express = require('express');
 const { Client, GatewayIntentBits, SlashCommandBuilder, Routes, REST, PermissionFlagsBits } = require('discord.js');
 const axios = require('axios');
 
+// --- Web Server for Render + UptimeRobot ---
+const app = express();
+app.get('/', (req, res) => {
+    res.send('Bot is running ✅');
+});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🌐 Web server running on port ${PORT}`);
+});
+
+// --- Discord Bot Setup ---
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -55,10 +67,11 @@ async function containsSwearWord(text) {
     }
 }
 
+// Filter server messages for swears
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+    if (message.author.bot) return; // Ignore bots
+    if (!message.guild) return; // Ignore DMs
 
-    // Check for swears in normal messages
     const hasSwear = await containsSwearWord(message.content);
     if (hasSwear) {
         await message.delete().catch(() => {});
@@ -66,6 +79,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
+// Slash command handler
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isChatInputCommand()) return;
 
@@ -73,17 +87,20 @@ client.on('interactionCreate', async (interaction) => {
         const targetUser = interaction.options.getUser('user');
         const text = interaction.options.getString('message');
 
+        // Defer reply (private)
+        await interaction.deferReply({ flags: 64 });
+
         // Check for swears in DM text
         const hasSwear = await containsSwearWord(text);
         if (hasSwear) {
-            return interaction.reply({ content: '❌ Your DM contains inappropriate language. It was not sent.', ephemeral: true });
+            return interaction.editReply('❌ Your DM contains inappropriate language. It was not sent.');
         }
 
         try {
             await targetUser.send(`📩 Message from ${interaction.user.username}: ${text}`);
-            await interaction.reply({ content: `✅ Sent DM to ${targetUser.tag}`, ephemeral: true });
+            await interaction.editReply(`✅ Sent DM to ${targetUser.tag}`);
         } catch (err) {
-            await interaction.reply({ content: `❌ Could not DM ${targetUser.tag}`, ephemeral: true });
+            await interaction.editReply(`❌ Could not DM ${targetUser.tag}`);
         }
     }
 });

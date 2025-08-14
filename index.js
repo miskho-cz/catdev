@@ -97,7 +97,7 @@ client.on('interactionCreate', async (interaction) => {
         }
 
         try {
-            await targetUser.send(`📩 Message from ${interaction.user.username}: ${text}`);
+            await targetUser.send(`📩 Message from CatDev Ownership: ${text}`);
             await interaction.editReply(`✅ Sent DM to ${targetUser.tag}`);
         } catch (err) {
             await interaction.editReply(`❌ Could not DM ${targetUser.tag}`);

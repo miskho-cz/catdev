@@ -1,112 +1,96 @@
 require('dotenv').config();
+const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder } = require('discord.js');
 const express = require('express');
-const { Client, GatewayIntentBits, SlashCommandBuilder, Routes, REST, PermissionFlagsBits } = require('discord.js');
-const axios = require('axios');
 
-// --- Web Server for Render + UptimeRobot ---
 const app = express();
-app.get('/', (req, res) => {
-    res.send('Bot is running ✅');
-});
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 10000;
+
+// Simple web server for Render/UptimeRobot
+app.get('/', (req, res) => res.send('Bot is alive.'));
 app.listen(PORT, () => {
     console.log(`🌐 Web server running on port ${PORT}`);
 });
 
-// --- Discord Bot Setup ---
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages
-    ]
-});
-
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
-
-// Register Slash Command
-(async () => {
-    try {
-        await rest.put(
-            Routes.applicationGuildCommands(process.env.CLIENT_ID, process.env.GUILD_ID),
-            {
-                body: [
-                    new SlashCommandBuilder()
-                        .setName('dm')
-                        .setDescription('Send a DM to a user')
-                        .addUserOption(option =>
-                            option.setName('user')
-                                .setDescription('The user to DM')
-                                .setRequired(true)
-                        )
-                        .addStringOption(option =>
-                            option.setName('message')
-                                .setDescription('The message to send')
-                                .setRequired(true)
-                        )
-                        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
-                        .toJSON()
-                ]
-            }
-        );
-        console.log('✅ Slash command registered.');
-    } catch (err) {
-        console.error(err);
-    }
-})();
-
-// Swear Word Filter Function
+// Swear word API check function (using native fetch)
 async function containsSwearWord(text) {
     try {
-        const res = await axios.get(process.env.SWEAR_API_URL + encodeURIComponent(text));
-        return res.data === true || res.data === 'true';
+        const res = await fetch(`https://www.purgomalum.com/service/json?text=${encodeURIComponent(text)}`);
+        const data = await res.json();
+        return data.result !== text;
     } catch (err) {
-        console.error('Error checking profanity:', err);
-        return false;
+        console.error('Swear filter API error:', err);
+        return false; // Fail safe
     }
 }
 
-// Filter server messages for swears
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return; // Ignore bots
-    if (!message.guild) return; // Ignore DMs
-
-    const hasSwear = await containsSwearWord(message.content);
-    if (hasSwear) {
-        await message.delete().catch(() => {});
-        await message.channel.send(`${message.author}, please watch your language! 🚫`);
-    }
+const client = new Client({
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.MessageContent
+    ],
+    partials: ['CHANNEL']
 });
 
-// Slash command handler
-client.on('interactionCreate', async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
+// Slash commands
+const commands = [
+    new SlashCommandBuilder()
+        .setName('dm')
+        .setDescription('DM a user with a message')
+        .addUserOption(option =>
+            option.setName('user').setDescription('User to DM').setRequired(true))
+        .addStringOption(option =>
+            option.setName('message').setDescription('Message to send').setRequired(true))
+].map(cmd => cmd.toJSON());
 
-    if (interaction.commandName === 'dm') {
-        const targetUser = interaction.options.getUser('user');
-        const text = interaction.options.getString('message');
+// Register commands on startup
+const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
 
-        // Defer reply (private)
-        await interaction.deferReply({ flags: 64 });
-
-        // Check for swears in DM text
-        const hasSwear = await containsSwearWord(text);
-        if (hasSwear) {
-            return interaction.editReply('❌ Your DM contains inappropriate language. It was not sent.');
-        }
-
-        try {
-            await targetUser.send(`📩 Message from CatDev Ownership: ${text}`);
-            await interaction.editReply(`✅ Sent DM to ${targetUser.tag}`);
-        } catch (err) {
-            await interaction.editReply(`❌ Could not DM ${targetUser.tag}`);
-        }
+(async () => {
+    try {
+        await rest.put(
+            Routes.applicationCommands(process.env.CLIENT_ID),
+            { body: commands }
+        );
+        console.log('✅ Slash command registered.');
+    } catch (err) {
+        console.error('Error registering commands:', err);
     }
-});
+})();
 
+// Bot ready event
 client.once('ready', () => {
     console.log(`🤖 Logged in as ${client.user.tag}`);
 });
 
-client.login(process.env.DISCORD_TOKEN);
+// Handle commands
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.commandName === 'dm') {
+        try {
+            await interaction.deferReply({ flags: 64 }).catch(() => {});
+
+            const targetUser = interaction.options.getUser('user');
+            const text = interaction.options.getString('message');
+
+            if (await containsSwearWord(text)) {
+                return interaction.editReply('❌ Your DM contains inappropriate language. It was not sent.').catch(() => {});
+            }
+
+            try {
+                await targetUser.send(`📩 Message from ${interaction.user.username}: ${text}`);
+                await interaction.editReply(`✅ Sent DM to ${targetUser.tag}`).catch(() => {});
+            } catch {
+                await interaction.editReply(`❌ Could not DM ${targetUser.tag}`).catch(() => {});
+            }
+        } catch (err) {
+            if (err.code !== 10062) {
+                console.error('DM command error:', err);
+            }
+        }
+    }
+});
+
+client.login(process.env.TOKEN);
+

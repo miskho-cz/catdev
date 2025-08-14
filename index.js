@@ -58,7 +58,7 @@ async function containsSwearWord(text) {
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // Check for swears
+    // Check for swears in normal messages
     const hasSwear = await containsSwearWord(message.content);
     if (hasSwear) {
         await message.delete().catch(() => {});
@@ -72,6 +72,12 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.commandName === 'dm') {
         const targetUser = interaction.options.getUser('user');
         const text = interaction.options.getString('message');
+
+        // Check for swears in DM text
+        const hasSwear = await containsSwearWord(text);
+        if (hasSwear) {
+            return interaction.reply({ content: '❌ Your DM contains inappropriate language. It was not sent.', ephemeral: true });
+        }
 
         try {
             await targetUser.send(`📩 Message from ${interaction.user.username}: ${text}`);
